@@ -1,0 +1,10 @@
+{
+    "mode": "IDLE",
+    "energy": "MEDIUM",
+    "trend": "STABLE_WEEK",
+    "startup_success_streak": 0,
+    "low_execution_days": 0,
+    "last_activity_ts": null,
+    "reset_mode": false,
+    "current_focus": null
+  }
