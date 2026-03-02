@@ -1,73 +1,171 @@
-# ClawCoach Heartbeat Loop
+# ClawCoach Heartbeat Engine
 
-Every cycle:
+On every heartbeat:
 
-1. Load state.json
-2. Load energy_log.json
-3. Load queue.md
-4. Load interrupts.md
-5. Load drift.md
-6. Load routine.md
+---------------------------------------
+STEP 0 — Load Core Files
+---------------------------------------
 
----
+Load:
+- state/state.json
+- state/events.jsonl (if exists)
+- regulation/queue.md
+- regulation/interrupts.md
+- regulation/drift.md
+- routine/routine.md
 
-Step 1: Check urgent interrupt
+Set NOW = current time
 
-If current_time >= event_time - prep - buffer:
-  mode = URGENT_INTERRUPT
-  Trigger preparation steps
-  STOP
 
----
+---------------------------------------
+STEP 1 — Apply New Events
+---------------------------------------
 
-Step 2: Check reset mode
+For each new event since last_heartbeat_ts:
+
+If ENERGY_SET:
+  state.energy = value
+
+If START_PRESSED:
+  set mode transition candidate STARTUP
+
+If PROGRESS:
+  update current_focus.last_progress_ts = NOW
+
+If CLOSURE:
+  mark task closed
+  clear current_focus
+
+If DRIFT_SET:
+  state.drift.allowed = true
+  state.drift.until_ts = provided time
+
+
+---------------------------------------
+STEP 2 — Transition Evaluation Order
+---------------------------------------
+
+Evaluate in strict order:
+
+1) URGENT INTERRUPT
+
+If NOW >= event_time - prep - buffer:
+  mode = ADJUSTING
+  sub_state = URGENT_INTERRUPT
+  last_transition = URGENT_INTERRUPT
+  GOTO REGULATION
+
+
+2) RESET MODE
 
 If low_execution_days >= 3:
   reset_mode = true
-  Only allow 2-minute tasks
-  No productivity language
+  mode = ADJUSTING
+  sub_state = RESET
+  last_transition = ENTER_RESET
+  GOTO REGULATION
 
----
 
-Step 3: Energy regulation
+3) ENERGY TRANSITION
 
-If energy == LOW:
+If energy == LOW AND sub_state != LOW_ENERGY:
+  mode = ADJUSTING
+  sub_state = LOW_ENERGY
+  last_transition = ENTER_LOW_ENERGY
+  GOTO REGULATION
+
+If energy >= MEDIUM AND sub_state == LOW_ENERGY:
+  increase recovery_candidate_cycles
+  If recovery_candidate_cycles >= 2:
+    sub_state = NONE
+    mode = RUNNING or IDLE
+    last_transition = EXIT_LOW_ENERGY
+    GOTO REGULATION
+
+
+4) DRIFT EXPIRY
+
+If drift.allowed == true AND NOW >= drift.until_ts:
+  drift.allowed = false
+  last_transition = DRIFT_EXPIRED
+  GOTO REGULATION
+
+
+5) STUCK DETECTION
+
+If mode == RUNNING AND
+   NOW - current_focus.last_progress_ts >= 15 minutes:
+    mode = ADJUSTING
+    sub_state = STUCK
+    last_transition = ENTER_STUCK
+    GOTO REGULATION
+
+
+6) STARTUP
+
+If START_PRESSED event detected:
+  mode = RUNNING
+  sub_state = NONE
+  startup_success_streak += 1
+  last_transition = STARTUP_SUCCESS
+  GOTO REGULATION
+
+
+---------------------------------------
+STEP 3 — Regulation Adjustments
+---------------------------------------
+
+If entering LOW_ENERGY or STUCK:
   Downshift:
-    Granularity → smaller
-    Time expectation → shorter
-    Success = START_COUNTS
+    granularity_level - 1 (min 0)
+    time_expectation shorter
+    success_definition = START_COUNTS
 
-If energy >= MEDIUM AND startup_success_streak >= 2:
-  Upshift granularity one level
+If exiting LOW_ENERGY:
+  Upshift one level only
 
----
 
-Step 4: Choose task
+---------------------------------------
+STEP 4 — Task Selection
+---------------------------------------
 
-Score tasks.
-If Important & Urgent:
-  Lock main track.
-Else if drift allowed:
-  Permit side.
-Else:
-  Choose highest score main track.
+If no active focus:
+  Score tasks from queue.md
+  If important+urgent:
+    select main track
+  Else if drift allowed:
+    allow side
+  Else:
+    select highest score
 
----
 
-Step 5: Inactivity check
+---------------------------------------
+STEP 5 — Closure Check
+---------------------------------------
 
-If no startup logged:
-  Propose smallest viable start (2–5 min).
-
----
-
-Step 6: Closure check
-
-If task started but not closed:
-  Ask for:
+If task started but no closure logged:
+  ask for:
     Done / Paused / Next tiny step
 
----
 
-If no condition triggered:
-  HEARTBEAT_OK
+---------------------------------------
+STEP 6 — Silence Principle
+---------------------------------------
+
+If last_transition updated this cycle:
+  Output minimal regulation message
+
+Else:
+  Output: HEARTBEAT_OK
+
+
+---------------------------------------
+STEP 7 — Save State
+---------------------------------------
+
+Update:
+- last_transition_ts
+- last_heartbeat_ts
+Write state/state.json
+
+End.

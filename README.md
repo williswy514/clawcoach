@@ -22,6 +22,7 @@ This repo follows the **OpenClaw** layout: everything lives in a few high‑sign
 
 - **state/**
   - `state.json` — Current machine state: mode flags, streaks, last task, etc.
+  - `events.jsonl` — Optional append-only signal log (JSONL) used for deterministic transitions.
   - `energy_log.json` — Log of energy samples over time (LOW / MEDIUM / HIGH, plus metadata).
   - `metrics.json` — Aggregate metrics (streaks, low‑execution days, resets entered, etc.).
 
@@ -51,16 +52,12 @@ This repo follows the **OpenClaw** layout: everything lives in a few high‑sign
 
 Each **heartbeat cycle** (manual or automated) runs the loop defined in `HEARTBEAT.md`:
 
-1. Load core state (`state.json`, `energy_log.json`, `queue.md`, `interrupts.md`, `drift.md`, `routine.md`).
-2. **Check urgent interrupts.** If something is near its prep/buffer window, enter `URGENT_INTERRUPT` mode and guide preparation.
-3. **Check reset mode.** If there are 3+ consecutive low‑execution days, enter RESET: only 2‑minute tasks, no productivity language, no counting failure.
-4. **Regulate by energy.**
-   - If energy is LOW: downshift granularity, shorten time expectations, count **starting** as success.
-   - If energy is MEDIUM/HIGH and startup_success_streak ≥ 2: gently up‑shift granularity and reduce intervention.
-5. **Choose a task.** Score tasks; if Important & Urgent exists, lock the main track. If drift is allowed, permit controlled drift with a return time; otherwise pick the best main track item.
-6. **Inactivity check.** If no startup is logged, propose the smallest viable start (2–5 minutes).
-7. **Closure check.** For started but not closed tasks, ask for Done / Paused / Next tiny step.
-8. If nothing triggers: output `HEARTBEAT_OK` and stay silent.
+1. Load core state (`state/state.json`) and regulation inputs (`regulation/*`, `routine/*`).
+2. Read new signals from `state/events.jsonl` (optional but recommended).
+3. Evaluate transitions in a strict order (urgent interrupt → reset → energy → drift → stuck/running → idle/running → recovery → trend).
+4. Apply regulation dials (downshift/upshift) only when entering/exiting adjustment states.
+5. Write updated `state/state.json`.
+6. Message only on transitions; otherwise: `HEARTBEAT_OK`.
 
 The system **never shames, moralizes, or enters therapy mode**. It mirrors behavior and suggests the smallest viable next action.
 

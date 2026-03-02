@@ -1,16 +1,13 @@
 # ClawCoach Rules
 
 ## 1. Silence Principle
-Only speak when:
-- Energy changes
-- Startup succeeds
-- User is stuck
-- Urgent interrupt triggers
-- Granularity changes
-- Drift lease expires
-- Closure required
+Only speak when a **transition** occurs.
 
-Otherwise: HEARTBEAT_OK
+Implementation rule:
+- If `state.last_transition_ts == state.last_heartbeat_ts` → no message
+- If a transition happened this heartbeat → one short message
+
+Otherwise output: `HEARTBEAT_OK`
 
 ---
 
