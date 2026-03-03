@@ -1,171 +1,143 @@
-# ClawCoach Heartbeat Engine
+# ClawCoach Heartbeat (Chat-Inference Version)
 
 On every heartbeat:
 
----------------------------------------
-STEP 0 — Load Core Files
----------------------------------------
-
+----------------------------------------
+STEP 0 — Load
+----------------------------------------
 Load:
 - state/state.json
-- state/events.jsonl (if exists)
 - regulation/queue.md
-- regulation/interrupts.md
-- regulation/drift.md
-- routine/routine.md
 
 Set NOW = current time
 
+Assume the heartbeat has access to the most recent user message in this session.
+Call it: LAST_USER_MESSAGE
 
----------------------------------------
-STEP 1 — Apply New Events
----------------------------------------
+----------------------------------------
+STEP 1 — Convert chat text into signals (NO manual trigger)
+----------------------------------------
 
-For each new event since last_heartbeat_ts:
+# 1) Energy inference (deterministic pattern match)
+If LAST_USER_MESSAGE contains any of:
+- "i'm down"
+- "im down"
+- "low energy"
+- "tired"
+- "exhausted"
+- "no energy"
+- "can't start"
+- "cannot start"
+- "overwhelmed"
+- "burnt out"
 
-If ENERGY_SET:
-  state.energy = value
+Then set:
+  state.energy = LOW
+  state.last_transition = "CHAT_ENERGY_LOW"
 
-If START_PRESSED:
-  set mode transition candidate STARTUP
+Else if LAST_USER_MESSAGE contains any of:
+- "i feel ok"
+- "medium energy"
+- "better now"
+- "back to normal"
 
-If PROGRESS:
-  update current_focus.last_progress_ts = NOW
+Then set:
+  state.energy = MEDIUM
+  state.last_transition = "CHAT_ENERGY_MEDIUM"
 
-If CLOSURE:
-  mark task closed
-  clear current_focus
+Else if LAST_USER_MESSAGE contains any of:
+- "high energy"
+- "i feel great"
+- "let's go"
+- "i can focus"
 
-If DRIFT_SET:
-  state.drift.allowed = true
-  state.drift.until_ts = provided time
+Then set:
+  state.energy = HIGH
+  state.last_transition = "CHAT_ENERGY_HIGH"
 
+# 2) Explicit time preference from chat (optional)
+If LAST_USER_MESSAGE contains "30 min" or "30 minutes":
+  state.current_focus.time_expectation_min = 30
 
----------------------------------------
-STEP 2 — Transition Evaluation Order
----------------------------------------
+If LAST_USER_MESSAGE contains "10 min" or "10 minutes":
+  state.current_focus.time_expectation_min = 10
 
-Evaluate in strict order:
+If LAST_USER_MESSAGE contains "5 min" or "5 minutes":
+  state.current_focus.time_expectation_min = 5
 
-1) URGENT INTERRUPT
+----------------------------------------
+STEP 2 — Transitions
+----------------------------------------
 
-If NOW >= event_time - prep - buffer:
-  mode = ADJUSTING
-  sub_state = URGENT_INTERRUPT
-  last_transition = URGENT_INTERRUPT
-  GOTO REGULATION
+# Enter LOW_ENERGY
+If state.energy == LOW AND state.sub_state != "LOW_ENERGY":
 
+  state.mode = "ADJUSTING"
+  state.sub_state = "LOW_ENERGY"
+  state.last_transition = "ENTER_LOW_ENERGY"
 
-2) RESET MODE
+  # Ensure baseline
+  If state.current_focus.time_expectation_min == 0:
+    state.current_focus.time_expectation_min = 30
 
-If low_execution_days >= 3:
-  reset_mode = true
-  mode = ADJUSTING
-  sub_state = RESET
-  last_transition = ENTER_RESET
-  GOTO REGULATION
-
-
-3) ENERGY TRANSITION
-
-If energy == LOW AND sub_state != LOW_ENERGY:
-  mode = ADJUSTING
-  sub_state = LOW_ENERGY
-  last_transition = ENTER_LOW_ENERGY
-  GOTO REGULATION
-
-If energy >= MEDIUM AND sub_state == LOW_ENERGY:
-  increase recovery_candidate_cycles
-  If recovery_candidate_cycles >= 2:
-    sub_state = NONE
-    mode = RUNNING or IDLE
-    last_transition = EXIT_LOW_ENERGY
-    GOTO REGULATION
-
-
-4) DRIFT EXPIRY
-
-If drift.allowed == true AND NOW >= drift.until_ts:
-  drift.allowed = false
-  last_transition = DRIFT_EXPIRED
-  GOTO REGULATION
-
-
-5) STUCK DETECTION
-
-If mode == RUNNING AND
-   NOW - current_focus.last_progress_ts >= 15 minutes:
-    mode = ADJUSTING
-    sub_state = STUCK
-    last_transition = ENTER_STUCK
-    GOTO REGULATION
-
-
-6) STARTUP
-
-If START_PRESSED event detected:
-  mode = RUNNING
-  sub_state = NONE
-  startup_success_streak += 1
-  last_transition = STARTUP_SUCCESS
-  GOTO REGULATION
-
-
----------------------------------------
-STEP 3 — Regulation Adjustments
----------------------------------------
-
-If entering LOW_ENERGY or STUCK:
-  Downshift:
-    granularity_level - 1 (min 0)
-    time_expectation shorter
-    success_definition = START_COUNTS
-
-If exiting LOW_ENERGY:
-  Upshift one level only
-
-
----------------------------------------
-STEP 4 — Task Selection
----------------------------------------
-
-If no active focus:
-  Score tasks from queue.md
-  If important+urgent:
-    select main track
-  Else if drift allowed:
-    allow side
+  # Downshift time expectation explicitly to 10 (your goal)
+  If state.current_focus.time_expectation_min >= 30:
+    state.current_focus.time_expectation_min = 10
+  Else if state.current_focus.time_expectation_min > 10:
+    state.current_focus.time_expectation_min = 5
   Else:
-    select highest score
+    state.current_focus.time_expectation_min = 2
+
+  state.current_focus.success_definition = "START_COUNTS"
+
+  # Select a task if none
+  If state.current_focus.task_id is null:
+    Select highest-score main-track task from regulation/queue.md
+    state.current_focus.task_id = selected task id
+    state.current_focus.started_ts = NOW
+    state.current_focus.last_progress_ts = NOW
+
+  # Schedule nudge in 10 minutes
+  state.next_nudge_ts = NOW + 10 minutes
+
+  GOTO SAVE_AND_OUTPUT
 
 
----------------------------------------
-STEP 5 — Closure Check
----------------------------------------
+# Exit LOW_ENERGY (simple version)
+If state.energy != LOW AND state.sub_state == "LOW_ENERGY":
+  state.sub_state = "NONE"
+  state.mode = "RUNNING" if state.current_focus.task_id != null else "IDLE"
+  state.last_transition = "EXIT_LOW_ENERGY"
+  GOTO SAVE_AND_OUTPUT
 
-If task started but no closure logged:
-  ask for:
-    Done / Paused / Next tiny step
+
+----------------------------------------
+STEP 3 — Nudge loop (reminder)
+----------------------------------------
+
+If state.next_nudge_ts != null AND NOW >= state.next_nudge_ts:
+
+  If state.sub_state == "LOW_ENERGY":
+    Output exactly one nudge:
+      "Low energy mode. 2 minutes: just open the file / doc for {task_id}."
+    state.next_nudge_ts = NOW + 10 minutes
+    GOTO SAVE_AND_OUTPUT
+
+  Else:
+    state.next_nudge_ts = null
+    GOTO SAVE_AND_OUTPUT
 
 
----------------------------------------
-STEP 6 — Silence Principle
----------------------------------------
+----------------------------------------
+STEP 4 — Silence principle output
+----------------------------------------
 
-If last_transition updated this cycle:
-  Output minimal regulation message
+SAVE_AND_OUTPUT:
 
+Write updated state/state.json (including timestamps)
+
+If state.last_transition changed this cycle:
+  Output a single short message:
+    "State updated: {sub_state}. Time now {time_expectation_min} minutes. Success = START."
 Else:
   Output: HEARTBEAT_OK
-
-
----------------------------------------
-STEP 7 — Save State
----------------------------------------
-
-Update:
-- last_transition_ts
-- last_heartbeat_ts
-Write state/state.json
-
-End.
