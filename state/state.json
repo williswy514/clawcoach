@@ -1,43 +1,15 @@
 {
-  "version": 1,
-
   "mode": "IDLE",
   "sub_state": "NONE",
-
-  "trend": "STABLE_WEEK",
-
   "energy": "MEDIUM",
-  "energy_confidence": "SELF_REPORT",
-
   "current_focus": {
     "task_id": null,
-    "track": null,
-    "granularity_level": 0,
     "time_expectation_min": 0,
-    "mode_switch": "NONE",
     "success_definition": "NONE",
     "started_ts": null,
     "last_progress_ts": null
   },
-
-  "startup_success_streak": 0,
-  "last_startup_ts": null,
-
-  "low_execution_days": 0,
-  "reset_mode": false,
-
-  "drift": {
-    "allowed": false,
-    "until_ts": null
-  },
-
-  "guards": {
-    "min_cycles_in_low_energy": 2,
-    "low_energy_enter_cycle": null,
-    "recovery_confirm_cycles": 2,
-    "recovery_candidate_cycles": 0
-  },
-
+  "next_nudge_ts": null,
   "last_transition": null,
   "last_transition_ts": null,
   "last_heartbeat_ts": null
