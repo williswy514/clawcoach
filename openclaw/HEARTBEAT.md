@@ -83,6 +83,7 @@ If EVENT_TEXT contains "CLOSURE DONE":
   set state.mode = IDLE
   set state.sub_state = NONE
   set state.next_nudge_ts = null
+  set state.time_box_ends_at = null
   set state.last_transition = "CLOSED_DONE"
 
 If EVENT_TEXT contains "CLOSURE PAUSED":
@@ -91,6 +92,7 @@ If EVENT_TEXT contains "CLOSURE PAUSED":
   set state.mode = IDLE
   set state.sub_state = NONE
   set state.next_nudge_ts = null
+  set state.time_box_ends_at = null
   set state.last_transition = "CLOSED_PAUSED"
 
 ----------------------------------------
@@ -129,6 +131,7 @@ If desired_start_minutes exists:
   state.dials.time_box_min = desired_start_minutes
   if state.current_focus.task_id is null:
     set state.next_nudge_ts = NOW
+  set state.time_box_ends_at = NOW + desired_start_minutes minutes
   set state.last_transition = "START_REQUESTED"
 
 ----------------------------------------
@@ -147,7 +150,8 @@ If state.mode != "IDLE" AND state.current_focus.task_id is null:
   state.current_focus.last_progress_ts = NOW
   state.current_focus.next_action_text = chosen.next_actions[state.dials.granularity]
 
-  state.next_nudge_ts = NOW + 2 minutes if state.energy == LOW else NOW + 10 minutes
+  state.next_nudge_ts = NOW + state.dials.time_box_min minutes
+  set state.time_box_ends_at = NOW + state.dials.time_box_min minutes
   set state.last_transition = "TASK_SELECTED"
 
 ----------------------------------------
@@ -159,15 +163,27 @@ If state.next_nudge_ts != null AND NOW >= state.next_nudge_ts AND state.current_
   Output one nudge:
   "Now: {state.dials.time_box_min} minutes. Next: {state.current_focus.next_action_text}"
 
-  state.next_nudge_ts = NOW + 2 minutes if state.energy == LOW else NOW + 10 minutes
+  state.next_nudge_ts = NOW + state.dials.time_box_min minutes
+  set state.time_box_ends_at = NOW + state.dials.time_box_min minutes
   set state.last_transition = "NUDGE_SENT"
 
 If state.energy == LOW AND state.current_focus.task_id is null:
   If state.next_nudge_ts == null OR NOW >= state.next_nudge_ts:
     Output one regulation nudge:
-    "You don't need to feel ready. Let's do a 2-minute start: open the task list and pick one tiny first move."
-    state.next_nudge_ts = NOW + 2 minutes
+    "You don't need to feel ready. Let's do a {state.dials.time_box_min}-minute start: open the task list and pick one tiny first move."
+    state.next_nudge_ts = NOW + state.dials.time_box_min minutes
+    set state.time_box_ends_at = NOW + state.dials.time_box_min minutes
     set state.last_transition = "LOW_ENERGY_START_NUDGE"
+
+----------------------------------------
+5b) Timer display and reminder (aligned to current step)
+----------------------------------------
+
+When outputting to the user and state.time_box_ends_at is set (any energy level):
+  Always append (or show separately) so the user sees both:
+  - "Timer: {state.dials.time_box_min} min — ends at {state.time_box_ends_at}."
+  - "I'll remind you when this step is up."
+Timer and reminder are aligned to the current step length (state.dials.time_box_min). The client/UI should display the timer and trigger the next heartbeat at state.next_nudge_ts (= time_box_ends_at) so the reminder is sent when the current step ends.
 
 ----------------------------------------
 6) Save + Silence Principle
@@ -187,6 +203,8 @@ Let STATE_CHANGED_FROM_INPUT =
 If INPUT_SIGNAL_DETECTED == true AND STATE_CHANGED_FROM_INPUT:
   Output:
   "Updated from your input: energy {PREV_ENERGY}->{state.energy}, mode {PREV_MODE}->{state.mode}, focus size {PREV_GRANULARITY}->{state.dials.granularity}, timer {PREV_TIME_BOX}->{state.dials.time_box_min}m."
+  If state.time_box_ends_at is set:
+    Also output: "Timer: {state.dials.time_box_min} min — ends at {state.time_box_ends_at}. I'll remind you when this step is up."
 Else if last_transition changed this cycle:
   If state.current_focus.task_id != null:
     Output:
@@ -194,8 +212,12 @@ Else if last_transition changed this cycle:
   Else:
     Output:
     "State: {state.energy}/{state.dials.granularity}. Next: take one tiny starter action."
+  If state.time_box_ends_at is set:
+    Also output: "Timer: {state.dials.time_box_min} min — ends at {state.time_box_ends_at}. I'll remind you when this step is up."
 Else:
   If state.energy == LOW:
     Output: "State: LOW. Start counts. Reply PROGRESS after any tiny move."
+    If state.time_box_ends_at is set:
+      Also output: "Timer: {state.dials.time_box_min} min — ends at {state.time_box_ends_at}. I'll remind you when this step is up."
   Else:
     Output: HEARTBEAT_OK
