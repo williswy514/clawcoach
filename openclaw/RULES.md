@@ -63,3 +63,22 @@ Drift allowed unless:
 Drift must:
 - Have return time
 - Trigger gentle re-entry
+
+---
+
+## 7. Event Bridge (Required for user text)
+
+When user sends plain language ("I am not good", "start now", "I made progress"), the system must run OpenClaw event command immediately:
+
+`openclaw system event --text "<EVENT_TEXT>" --mode now`
+
+Implementation rules:
+- Prefer canonical mapping before send:
+  - low-energy phrasing -> `ENERGY_SET LOW`
+  - start intent -> `START 2` (or configured default)
+  - progress -> `PROGRESS`
+  - pause -> `CLOSURE PAUSED`
+  - done -> `CLOSURE DONE`
+- If mapping is unclear, send raw user text as EVENT_TEXT.
+- HEARTBEAT consumes EVENT_TEXT and updates timer, timestamps, and state.
+- If this bridge is not running, heartbeat cannot react to user input in real time.

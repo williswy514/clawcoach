@@ -7,13 +7,63 @@ Load:
 - regulation/queue.json
 
 Set NOW = current time
+Set NOW_ISO = current time in ISO-8601 UTC (example: 2026-03-05T17:42:00Z)
 Let EVENT_TEXT = triggering system event text (or empty)
 Let PREV_ENERGY = state.energy
 Let PREV_MODE = state.mode
 Let PREV_SUB_STATE = state.sub_state
-Let PREV_GRANULARITY = state.dials.granularity
-Let PREV_TIME_BOX = state.dials.time_box_min
+Let PREV_GRANULARITY = state.dials.granularity if state.dials exists else null
+Let PREV_TIME_BOX = state.dials.time_box_min if state.dials exists else null
 Let INPUT_SIGNAL_DETECTED = false
+
+----------------------------------------
+0) Bootstrap missing state shape (required)
+----------------------------------------
+
+If state.dials is missing:
+  set state.dials = {}
+If state.current_focus is missing:
+  set state.current_focus = {}
+
+If state.dials.granularity is missing: set state.dials.granularity = "TINY"
+If state.dials.time_box_min is missing: set state.dials.time_box_min = 10
+If state.dials.success_definition is missing: set state.dials.success_definition = "STAGE"
+
+If state.current_focus.task_id is missing: set state.current_focus.task_id = null
+If state.current_focus.started_ts is missing: set state.current_focus.started_ts = null
+If state.current_focus.last_progress_ts is missing: set state.current_focus.last_progress_ts = null
+If state.current_focus.next_action_text is missing: set state.current_focus.next_action_text = null
+
+If state.next_nudge_ts is missing: set state.next_nudge_ts = null
+If state.time_box_ends_at is missing: set state.time_box_ends_at = null
+If state.last_transition is missing: set state.last_transition = null
+If state.last_transition_ts is missing: set state.last_transition_ts = null
+If state.last_heartbeat_ts is missing: set state.last_heartbeat_ts = null
+
+----------------------------------------
+0b) Event bridge contract (required)
+----------------------------------------
+
+If user provides plain-language input (chat/text), the system MUST convert it into an OpenClaw event command and run it immediately:
+
+`openclaw system event --text "<EVENT_TEXT>" --mode now`
+
+The bridge may map language to canonical commands first, then send the command text as EVENT_TEXT.
+
+Minimum mapping requirements:
+- low-energy phrasing (for example: "I am not good", "can't start", "overwhelmed") -> `ENERGY_SET LOW`
+- medium-energy phrasing -> `ENERGY_SET MEDIUM`
+- high-energy phrasing -> `ENERGY_SET HIGH`
+- start intent ("start", "begin", "kickoff") -> `START 2` (or configured default)
+- progress intent -> `PROGRESS`
+- pause intent -> `CLOSURE PAUSED`
+- done intent -> `CLOSURE DONE`
+
+If no canonical mapping is found:
+- send the raw user text as EVENT_TEXT via the same command
+- heartbeat natural-language rules still parse and adapt from that text
+
+Without this event bridge, heartbeat cannot adapt from user input because EVENT_TEXT will be empty.
 
 ----------------------------------------
 1) Parse command signals from EVENT_TEXT
@@ -73,7 +123,7 @@ If EVENT_TEXT contains "DRIFT 60":
 
 If EVENT_TEXT contains "PROGRESS":
   set INPUT_SIGNAL_DETECTED = true
-  set state.current_focus.last_progress_ts = NOW
+  set state.current_focus.last_progress_ts = NOW_ISO
   set state.next_nudge_ts = NOW + 15 minutes
   set state.last_transition = "PROGRESS_PING"
 
@@ -146,8 +196,8 @@ If state.mode != "IDLE" AND state.current_focus.task_id is null:
   Choose highest score task (prefer track=main)
 
   state.current_focus.task_id = chosen.id
-  state.current_focus.started_ts = NOW
-  state.current_focus.last_progress_ts = NOW
+  state.current_focus.started_ts = NOW_ISO
+  state.current_focus.last_progress_ts = NOW_ISO
   state.current_focus.next_action_text = chosen.next_actions[state.dials.granularity]
 
   state.next_nudge_ts = NOW + state.dials.time_box_min minutes
@@ -189,7 +239,12 @@ Timer and reminder are aligned to the current step length (state.dials.time_box_
 6) Save + Silence Principle
 ----------------------------------------
 
-Write state/state.json with last_heartbeat_ts = NOW
+Write state/state.json after all updates
+Write timestamp fields as ISO-8601 UTC strings:
+- state.last_heartbeat_ts = NOW_ISO
+- state.last_transition_ts = NOW_ISO when last_transition changes
+- state.next_nudge_ts = ISO-8601 UTC value (not relative text)
+- state.time_box_ends_at = ISO-8601 UTC value (not relative text)
 
 Let STATE_CHANGED_FROM_INPUT =
   EVENT_TEXT is not empty AND (

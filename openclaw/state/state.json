@@ -2,14 +2,21 @@
   "mode": "IDLE",
   "sub_state": "NONE",
   "energy": "MEDIUM",
+  "dials": {
+    "granularity": "TINY",
+    "time_box_min": 10,
+    "success_definition": "STAGE"
+  },
   "current_focus": {
     "task_id": null,
+    "next_action_text": null,
     "time_expectation_min": 0,
     "success_definition": "NONE",
     "started_ts": null,
     "last_progress_ts": null
   },
   "next_nudge_ts": null,
+  "time_box_ends_at": null,
   "last_transition": null,
   "last_transition_ts": null,
   "last_heartbeat_ts": null
